@@ -149,27 +149,44 @@ def select_best(table1: dict, table2: np.ndarray,
     Compare all linear and RBF results; return the best model spec.
     Tie-break: linear > rbf; smaller C; smaller gamma.
 
-    Returns a dict with keys: 'kernel', 'C', and optionally 'gamma'.
+    Returns a dict with keys:
+      'kernel', 'C', optionally 'gamma', 'cv_score',
+      'best_linear': {'C', 'cv_score'},
+      'best_rbf':    {'C', 'gamma', 'cv_score'}.
     """
-    best_score = -1.0
-    best_spec  = None
-
-    # Check linear candidates (prefer linear on tie → check first)
+    # ── Best linear (smallest C wins ties) ────
+    best_linear_score = -1.0
+    best_linear_C = None
     for C in C_list:
         score = table1[C]
-        if score > best_score:
-            best_score = score
-            best_spec  = {"kernel": "linear", "C": C}
+        if score > best_linear_score:
+            best_linear_score = score
+            best_linear_C = C
 
-    # Check RBF candidates (only accept if strictly better)
+    # ── Best RBF (smallest C then smallest gamma wins ties) ────
+    best_rbf_score = -1.0
+    best_rbf_C = None
+    best_rbf_gamma = None
     for i, C in enumerate(C_list):
         for j, gamma in enumerate(gamma_list):
             score = table2[i, j]
-            if score > best_score:
-                best_score = score
-                best_spec  = {"kernel": "rbf", "C": C, "gamma": gamma}
+            if score > best_rbf_score:
+                best_rbf_score = score
+                best_rbf_C = C
+                best_rbf_gamma = gamma
 
-    best_spec["cv_score"] = best_score
+    # ── Overall winner (prefer linear on tie) ─
+    if best_linear_score >= best_rbf_score:
+        best_spec = {"kernel": "linear", "C": best_linear_C,
+                     "cv_score": best_linear_score}
+    else:
+        best_spec = {"kernel": "rbf", "C": best_rbf_C,
+                     "gamma": best_rbf_gamma, "cv_score": best_rbf_score}
+
+    # Attach per-kernel bests for Table 3 reporting
+    best_spec["best_linear"] = {"C": best_linear_C, "cv_score": best_linear_score}
+    best_spec["best_rbf"]    = {"C": best_rbf_C, "gamma": best_rbf_gamma,
+                                "cv_score": best_rbf_score}
     return best_spec
 
 
@@ -229,17 +246,20 @@ def print_table2(table2: np.ndarray, C_list: list, gamma_list: list) -> None:
 
 
 def print_table3(best_spec: dict, test_acc: float) -> None:
+    bl = best_spec["best_linear"]
+    br = best_spec["best_rbf"]
     kernel = best_spec["kernel"]
-    C      = best_spec["C"]
     if kernel == "rbf":
-        setting = f"rbf, C={C}, gamma={best_spec['gamma']}"
+        overall = f"rbf,    C={best_spec['C']}, gamma={best_spec['gamma']}"
     else:
-        setting = f"linear, C={C}"
+        overall = f"linear, C={best_spec['C']}"
     print(f"\n{'='*60}")
     print("TABLE 3 — Test Set Accuracy")
     print(f"{'='*60}")
-    print(f"Best setting : {setting}")
-    print(f"Best CV score: {best_spec['cv_score']:.4f}")
+    print(f"Best linear : C={bl['C']:<8}            CV acc = {bl['cv_score']:.4f}")
+    print(f"Best RBF    : C={br['C']:<8} gamma={br['gamma']:<6} CV acc = {br['cv_score']:.4f}")
+    print("-" * 60)
+    print(f"Selected    : {overall}")
     print(f"Test accuracy: {test_acc:.4f}")
 
 
@@ -265,16 +285,19 @@ def save_outputs(table1: dict, table2: np.ndarray,
 
     # final_result.txt
     kernel = best_spec["kernel"]
+    bl = best_spec["best_linear"]
+    br = best_spec["best_rbf"]
     if kernel == "rbf":
-        setting = f"rbf, C={best_spec['C']}, gamma={best_spec['gamma']}"
+        overall = f"rbf, C={best_spec['C']}, gamma={best_spec['gamma']}"
     else:
-        setting = f"linear, C={best_spec['C']}"
+        overall = f"linear, C={best_spec['C']}"
 
     lines = [
         "AI6102 Q2 Final Result",
         "======================",
-        f"Best setting : {setting}",
-        f"Best CV score: {best_spec['cv_score']:.4f}",
+        f"Best linear : C={bl['C']}, CV acc={bl['cv_score']:.4f}",
+        f"Best RBF    : C={br['C']}, gamma={br['gamma']}, CV acc={br['cv_score']:.4f}",
+        f"Selected    : {overall}",
         f"Test accuracy: {test_acc:.4f}",
     ]
     with open(os.path.join(DATA_DIR, "final_result.txt"), "w") as f:
